@@ -96,7 +96,11 @@
   function setupStage() {
     const layout = levelLayouts[(stage - 1) % levelLayouts.length];
     platforms = layout.floors.map(y => ({x:34, y, w:732, h:12}));
-    ladders = layout.ladders.map(l => ({...l}));
+    ladders = layout.ladders.map(l => ({
+      x: l.x,
+      hi: Math.min(l.lo, l.hi),
+      lo: Math.max(l.lo, l.hi)
+    }));
     fruits = [];
     // Place fruits along each floor, away from the ladder edges.
     let count = layout.fruitCount;

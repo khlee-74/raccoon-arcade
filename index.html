@@ -182,10 +182,60 @@
     const p=player;
     const left=keys.has("ArrowLeft"), right=keys.has("ArrowRight"), up=keys.has("ArrowUp"), down=keys.has("ArrowDown");
     p.vx=(left?-1:0)+(right?1:0); if(p.vx!==0)p.face=Math.sign(p.vx);
-    const ladder=ladders.find(l=>p.x+p.w/2>l.x-15&&p.x+p.w/2<l.x+15&&p.y+p.h>l.hi&&p.y<l.lo+8);
-    if(ladder&&(up||down)) {p.climbing=true;p.vy=0;p.x += (ladder.x-(p.x+p.w/2))*Math.min(1,dt*12);p.y+=(up?-1:1)*125*dt;}
-    else if(p.climbing && ladder && p.y+p.h>ladder.hi && p.y<ladder.lo) {p.y+=(up?-1:down?1:0)*125*dt;}
-    else {p.climbing=false;p.x+=p.vx*190*dt;p.vy+=850*dt;p.y+=p.vy*dt;}
+    // Ladder detection and climbing
+    const ladder = ladders.find(l =>
+      Math.abs((p.x + p.w / 2) - l.x) < 25 &&
+      p.y + p.h >= l.hi - 8 &&
+      p.y <= l.lo + 8
+    );
+
+    // Keep using the same ladder while climbing
+    const activeLadder = ladder || (p.climbing
+      ? ladders.find(l =>
+          Math.abs((p.x + p.w / 2) - l.x) < 32 &&
+          p.y + p.h >= l.hi - 20 &&
+          p.y <= l.lo + 20
+        )
+      : null);
+
+    if (activeLadder && (up || down)) {
+      p.climbing = true;
+      p.vy = 0;
+
+      // Align the raccoon with the ladder
+      p.x += (activeLadder.x - (p.x + p.w / 2))
+        * Math.min(1, dt * 12);
+
+      // Climb up or down
+      p.y += (up ? -1 : 1) * 125 * dt;
+
+      // Stop exactly at the next floor
+      const topY = activeLadder.hi - p.h;
+      const bottomY = activeLadder.lo - p.h;
+
+      if (p.y <= topY) {
+        p.y = topY;
+        p.climbing = false;
+        p.vy = 0;
+      } else if (p.y >= bottomY) {
+        p.y = bottomY;
+        p.climbing = false;
+        p.vy = 0;
+      }
+
+    } else if (activeLadder && p.climbing) {
+      // Stay on the ladder when no direction is pressed
+      p.vy = 0;
+      p.x += (activeLadder.x - (p.x + p.w / 2))
+        * Math.min(1, dt * 12);
+
+    } else {
+      // Normal walking and gravity
+      p.climbing = false;
+      p.x += p.vx * 190 * dt;
+      p.vy += 850 * dt;
+      p.y += p.vy * dt;
+    }
     p.x=Math.max(34,Math.min(W-34-p.w,p.x));
     p.onGround=false;
     if(!p.climbing) for(const plat of platforms) {

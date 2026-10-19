@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>너구리 오락실 - Retro Raccoon</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: #101126; color: #fff;
+    font-family: "Courier New", monospace; display: flex; flex-direction: column;
+    align-items: center; padding: 14px 10px 22px; touch-action: manipulation;
+  }
+  h1 { margin: 4px 0 10px; color: #ffe66d; font-size: clamp(20px, 4vw, 32px); text-shadow: 3px 3px #e84a5f; text-align:center; }
+  .cabinet { width: min(100%, 900px); background:#24264a; border:4px solid #7479c6; border-radius:14px; padding:12px; box-shadow: 0 0 0 4px #151630, 0 12px 30px #0008; }
+  .hud { display:flex; flex-wrap:wrap; justify-content:space-between; gap:7px; padding:7px 9px 11px; color:#fff3a6; font-weight:bold; font-size:clamp(12px,2.4vw,17px); }
+  .hud span { white-space:nowrap; }
+  .screen { position:relative; width:100%; overflow:hidden; background:#11172f; border:3px solid #101126; border-radius:5px; }
+  canvas { display:block; width:100%; height:auto; image-rendering:pixelated; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:12px; text-align:center; padding:18px; background:#101126d9; }
+  .overlay.hidden { display:none; }
+  .overlay h2 { margin:0; color:#ffe66d; font-size:clamp(22px,5vw,40px); text-shadow:3px 3px #e84a5f; }
+  .overlay p { margin:0; line-height:1.6; font-size:clamp(12px,2.5vw,17px); }
+  button { font: bold 16px "Courier New", monospace; color:#17182d; background:#ffe66d; border:3px solid #fff3a6; border-radius:8px; padding:11px 17px; cursor:pointer; box-shadow:0 4px #c78e32; touch-action:manipulation; }
+  button:active { transform:translateY(3px); box-shadow:0 1px #c78e32; }
+  .help { text-align:center; color:#d5d8ff; font-size:12px; line-height:1.6; padding:10px 2px 3px; }
+  .touch-controls { width:min(100%,900px); display:flex; justify-content:space-between; align-items:center; gap:14px; padding:15px 4px 0; user-select:none; }
+  .pad { display:grid; grid-template-columns:repeat(3, minmax(52px,68px)); grid-template-rows:repeat(2,54px); gap:7px; }
+  .pad button, .action button { padding:0; font-size:22px; min-width:0; min-height:50px; box-shadow:0 4px #7770a8; background:#474a7d; color:#fff; border-color:#8589d0; }
+  .pad .up { grid-column:2; grid-row:1; }
+  .pad .left { grid-column:1; grid-row:2; }
+  .pad .down { grid-column:2; grid-row:2; }
+  .pad .right { grid-column:3; grid-row:2; }
+  .action { display:flex; flex-direction:column; gap:9px; }
+  .action button { padding:0 12px; font-size:14px; min-width:90px; background:#d84d68; border-color:#ff9bad; }
+  @media (min-width:700px) { .touch-controls { max-width:520px; } }
+  @media (max-width:380px) { .pad { grid-template-columns:repeat(3,50px); grid-template-rows:repeat(2,48px); } .touch-controls { gap:6px; } .action button { min-width:78px; font-size:12px; } }
+</style>
+</head>
+<body>
+<h1>★ 너구리 오락실 ★</h1>
+<main class="cabinet">
+  <div class="hud">
+    <span>점수 <b id="score">000000</b></span>
+    <span>최고 <b id="best">000000</b></span>
+    <span>스테이지 <b id="stage">1</b></span>
+    <span>목숨 <b id="lives">♥ ♥ ♥</b></span>
+  </div>
+  <div class="screen">
+    <canvas id="game" width="800" height="560" aria-label="너구리 오락실 게임"></canvas>
+    <div class="overlay" id="overlay">
+      <h2 id="overlayTitle">너구리 오락실</h2>
+      <p id="overlayText">과일을 모두 모으고 출구에 도착하라!<br>적을 조심해. 총 5개 스테이지에 도전!</p>
+      <button id="startBtn">게임 시작</button>
+    </div>
+  </div>
+  <div class="help">PC: ← → 이동 · ↑ ↓ 사다리 · SPACE 점프 · P 일시정지<br>스마트폰: 아래 버튼을 누르거나 길게 눌러 이동</div>
+</main>
+<div class="touch-controls" aria-label="터치 조작">
+  <div class="pad">
+    <button class="up" data-key="ArrowUp" aria-label="위">▲</button>
+    <button class="left" data-key="ArrowLeft" aria-label="왼쪽">◀</button>
+    <button class="down" data-key="ArrowDown" aria-label="아래">▼</button>
+    <button class="right" data-key="ArrowRight" aria-label="오른쪽">▶</button>
+  </div>
+  <div class="action">
+    <button id="jumpBtn">점프!</button>
+    <button id="pauseBtn">일시정지</button>
+  </div>
+</div>
+<script>
+(() => {
+  "use strict";
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const $ = id => document.getElementById(id);
+  const keys = new Set();
+  const BEST_KEY = "retroRaccoonBestScore";
+  let best = 0;
+  try { best = Number(localStorage.getItem(BEST_KEY)) || 0; } catch(e) {}
+  let score = 0, lives = 3, stage = 1, running = false, paused = false;
+  let mode = "title", player, platforms, ladders, fruits, enemies, exit, invincible = 0;
+  let lastTime = 0, anim = 0, messageTimer = 0;
+  $("best").textContent = String(best).padStart(6, "0");
+
+  const levelLayouts = [
+    { floors:[500,405,310,215,120], ladders:[{x:125,lo:405,hi:500},{x:660,lo:405,hi:500},{x:285,lo:310,hi:405},{x:540,lo:310,hi:405},{x:140,lo:215,hi:310},{x:690,lo:215,hi:310},{x:400,lo:120,hi:215}], fruitCount:12 },
+    { floors:[500,405,310,215,120], ladders:[{x:200,lo:405,hi:500},{x:590,lo:405,hi:500},{x:420,lo:310,hi:405},{x:130,lo:310,hi:405},{x:270,lo:215,hi:310},{x:650,lo:215,hi:310},{x:500,lo:120,hi:215}], fruitCount:14 },
+    { floors:[500,405,310,215,120], ladders:[{x:100,lo:405,hi:500},{x:430,lo:405,hi:500},{x:700,lo:310,hi:405},{x:250,lo:310,hi:405},{x:550,lo:215,hi:310},{x:150,lo:215,hi:310},{x:380,lo:120,hi:215}], fruitCount:16 },
+    { floors:[500,405,310,215,120], ladders:[{x:170,lo:405,hi:500},{x:650,lo:405,hi:500},{x:330,lo:310,hi:405},{x:570,lo:310,hi:405},{x:110,lo:215,hi:310},{x:440,lo:215,hi:310},{x:700,lo:120,hi:215}], fruitCount:18 },
+    { floors:[500,405,310,215,120], ladders:[{x:110,lo:405,hi:500},{x:350,lo:405,hi:500},{x:680,lo:405,hi:500},{x:220,lo:310,hi:405},{x:520,lo:310,hi:405},{x:130,lo:215,hi:310},{x:400,lo:215,hi:310},{x:650,lo:120,hi:215}], fruitCount:20 }
+  ];
+
+  function setupStage() {
+    const layout = levelLayouts[(stage - 1) % levelLayouts.length];
+    platforms = layout.floors.map(y => ({x:34, y, w:732, h:12}));
+    ladders = layout.ladders.map(l => ({...l}));
+    fruits = [];
+    // Place fruits along each floor, away from the ladder edges.
+    let count = layout.fruitCount;
+    const spots = [];
+    layout.floors.forEach((y, row) => {
+      const n = Math.ceil(count / layout.floors.length);
+      for (let i=0; i<n && spots.length<count; i++) {
+        const x = 70 + ((i * 131 + row * 83 + stage * 29) % 650);
+        if (!spots.some(s => Math.abs(s.x-x)<38 && s.y===y-20)) spots.push({x,y:y-20});
+      }
+    });
+    while (spots.length < count) {
+      const row = spots.length % layout.floors.length;
+      spots.push({x:60 + ((spots.length*97+stage*17)%680), y:layout.floors[row]-20});
+    }
+    spots.slice(0,count).forEach((s,i)=>fruits.push({x:s.x,y:s.y,kind:i%4,taken:false,bob:Math.random()*6}));
+    player = {x:55,y:460,w:30,h:35,vx:0,vy:0,climbing:false,onGround:false,face:1};
+    enemies = [
+      {x:700,y:465,w:30,h:30,dir:-1,floor:500,speed:70+stage*5},
+      {x:390,y:370,w:30,h:30,dir:1,floor:405,speed:55+stage*4}
+    ];
+    if(stage>=3) enemies.push({x:590,y:275,w:30,h:30,dir:-1,floor:310,speed:65+stage*4});
+    exit = {x:720,y:78,w:36,h:42};
+    invincible = 1.5;
+    updateHud();
+  }
+  function updateHud() {
+    $("score").textContent = String(score).padStart(6,"0");
+    $("best").textContent = String(Math.max(best,score)).padStart(6,"0");
+    $("stage").textContent = stage;
+    $("lives").textContent = lives>0 ? "♥ ".repeat(lives).trim() : "—";
+  }
+  function addScore(n) {
+    score += n;
+    if(score>best) {
+      best=score;
+      try { localStorage.setItem(BEST_KEY,String(best)); } catch(e) {}
+    }
+    updateHud();
+  }
+  function startGame() {
+    score=0; lives=3; stage=1; paused=false; mode="playing"; running=true;
+    setupStage(); hideOverlay(); lastTime=performance.now();
+  }
+  function hideOverlay(){ $("overlay").classList.add("hidden"); }
+  function showOverlay(title, text, button) {
+    $("overlayTitle").textContent=title; $("overlayText").innerHTML=text;
+    $("startBtn").textContent=button; $("overlay").classList.remove("hidden");
+  }
+  function togglePause() {
+    if(mode!=="playing") return;
+    paused=!paused;
+    if(paused) showOverlay("일시정지","잠깐 쉬어 가도 좋아!","계속하기");
+    else hideOverlay();
+  }
+  $("startBtn").addEventListener("click",()=>{
+    if(mode==="playing" && paused){paused=false;hideOverlay();lastTime=performance.now();}
+    else startGame();
+  });
+  $("pauseBtn").addEventListener("click",togglePause);
+  $("jumpBtn").addEventListener("pointerdown",e=>{e.preventDefault(); if(mode==="playing"&&!paused && player.onGround){player.vy=-390;player.onGround=false;}});
+  function setKey(k, down) {
+    if(down) keys.add(k); else keys.delete(k);
+    if(k===" " && down && mode==="playing"&&!paused && player.onGround){player.vy=-390;player.onGround=false;}
+  }
+  document.addEventListener("keydown",e=>{
+    if(["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," ","p","P"].includes(e.key)) e.preventDefault();
+    if(e.key==="p"||e.key==="P"){if(!e.repeat)togglePause();return;}
+    setKey(e.key,true);
+  });
+  document.addEventListener("keyup",e=>setKey(e.key,false));
+  document.querySelectorAll("[data-key]").forEach(btn=>{
+    const k=btn.dataset.key;
+    btn.addEventListener("pointerdown",e=>{e.preventDefault();btn.setPointerCapture?.(e.pointerId);setKey(k,true);});
+    const release=e=>{e.preventDefault();setKey(k,false);};
+    btn.addEventListener("pointerup",release);btn.addEventListener("pointercancel",release);btn.addEventListener("lostpointercapture",()=>setKey(k,false));
+    btn.addEventListener("contextmenu",e=>e.preventDefault());
+  });
+  function hit(a,b) { return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y; }
+  function update(dt) {
+    if(mode!=="playing"||paused) return;
+    anim+=dt; if(invincible>0)invincible-=dt;
+    const p=player;
+    const left=keys.has("ArrowLeft"), right=keys.has("ArrowRight"), up=keys.has("ArrowUp"), down=keys.has("ArrowDown");
+    p.vx=(left?-1:0)+(right?1:0); if(p.vx!==0)p.face=Math.sign(p.vx);
+    const ladder=ladders.find(l=>p.x+p.w/2>l.x-15&&p.x+p.w/2<l.x+15&&p.y+p.h>l.hi&&p.y<l.lo+8);
+    if(ladder&&(up||down)) {p.climbing=true;p.vy=0;p.x += (ladder.x-(p.x+p.w/2))*Math.min(1,dt*12);p.y+=(up?-1:1)*125*dt;}
+    else if(p.climbing && ladder && p.y+p.h>ladder.hi && p.y<ladder.lo) {p.y+=(up?-1:down?1:0)*125*dt;}
+    else {p.climbing=false;p.x+=p.vx*190*dt;p.vy+=850*dt;p.y+=p.vy*dt;}
+    p.x=Math.max(34,Math.min(W-34-p.w,p.x));
+    p.onGround=false;
+    if(!p.climbing) for(const plat of platforms) {
+      const wasAbove=p.y+p.h-p.vy*dt<=plat.y+3;
+      if(p.x+p.w>plat.x&&p.x<plat.x+plat.w&&p.y+p.h>=plat.y&&p.y+p.h<=plat.y+16&&p.vy>=0&&wasAbove){
+        p.y=plat.y-p.h;p.vy=0;p.onGround=true;
+      }
+    }
+    if(p.y>H+40){ loseLife();return; }
+    fruits.forEach(f=>{
+      if(!f.taken && hit({x:p.x+4,y:p.y+4,w:p.w-8,h:p.h-8},{x:f.x-12,y:f.y-12,w:24,h:24})){
+        f.taken=true;addScore(100);
+      }
+    });
+    enemies.forEach(e=>{
+      e.x+=e.dir*e.speed*dt;
+      if(e.x<38){e.x=38;e.dir=1;} if(e.x>W-68){e.x=W-68;e.dir=-1;}
+      // Keep enemies walking on their assigned platform.
+      if(invincible<=0 && hit(p,e)){loseLife();}
+    });
+    if(fruits.every(f=>f.taken) && hit(p,exit)) {
+      addScore(500+stage*100);
+      if(stage>=5){mode="won";running=false;showOverlay("완벽해!","5개 스테이지를 모두 정복했어!<br>최종 점수: "+score,"다시 하기");}
+      else {stage++;setupStage();messageTimer=1.2;}
+    }
+  }
+  function loseLife() {
+    lives--; updateHud();
+    if(lives<=0){mode="over";running=false;showOverlay("게임 오버","최종 점수: "+score+"<br>다시 도전해서 최고 기록을 세워 봐!","다시 하기");}
+    else {player.x=55;player.y=460;player.vx=0;player.vy=0;invincible=2;}
+  }
+  function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),Math.round(w),Math.round(h));}
+  function drawRaccoon(x,y,face,blink=false) {
+    ctx.save();ctx.translate(Math.round(x+15),Math.round(y+17));ctx.scale(face,1);
+    // striped tail
+    rect(-17,5,9,8,"#8a6248");rect(-20,3,5,5,"#e2c59a");rect(-18,10,6,4,"#e2c59a");
+    // ears, body, face
+    rect(-11,-15,7,8,"#8a6248");rect(5,-15,7,8,"#8a6248");rect(-12,-13,5,5,"#f4d6b1");rect(7,-13,4,5,"#f4d6b1");
+    rect(-12,-9,24,20,"#b98960");rect(-10,-15,20,18,"#c99a6c");
+    rect(-11,-8,8,8,"#333044");rect(3,-8,8,8,"#333044");rect(-7,-6,4,4,"#fff");rect(5,-6,4,4,"#fff");
+    rect(-1,-1,5,4,"#332c3a");rect(-5,3,12,3,"#f4d6b1");
+    rect(-9,10,6,7,"#f4d6b1");rect(4,10,6,7,"#f4d6b1");
+    rect(-8,16,7,3,"#f2c84b");rect(3,16,7,3,"#f2c84b");
+    ctx.restore();
+  }
+  function drawFruit(f) {
+    const y=f.y+Math.sin(anim*4+f.bob)*2;
+    const colors=["#f24f5e","#ff9f43","#a66cff","#6bd66b"];
+    const c=colors[f.kind];
+    rect(f.x-7,y-5,14,13,c);rect(f.x-3,y-9,5,5,"#68d66e");rect(f.x+1,y-10,5,3,"#3eaa62");
+    rect(f.x-4,y-2,3,4,"#fff5bb");
+  }
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    // starry night background
+    rect(0,0,W,H,"#121936");
+    for(let i=0;i<45;i++){const x=(i*173+29)%W,y=(i*67+23)%H;if(y<95)rect(x,y,3,3,"#59649a");}
+    // decorative skyline
+    for(let i=0;i<14;i++){let x=i*61;rect(x,72,35,38,"#20284d");rect(x+7,80,5,5,"#f9d96a");rect(x+20,80,5,5,"#f9d96a");}
+    // platforms with colorful checker edges
+    platforms.forEach(p=>{
+      rect(p.x,p.y,p.w,p.h,"#f3b94f");rect(p.x,p.y,p.w,4,"#fff0a6");
+      for(let x=p.x;x<p.x+p.w;x+=24)rect(x,p.y+7,12,5,"#d87b4b");
+    });
+    // ladders
+    ladders.forEach(l=>{
+      rect(l.x-11,l.hi,5,l.lo-l.hi,"#e8c57c");rect(l.x+6,l.hi,5,l.lo-l.hi,"#e8c57c");
+      for(let y=l.hi+5;y<l.lo;y+=17)rect(l.x-10,y,20,4,"#fff0a6");
+    });
+    // exit
+    rect(exit.x,exit.y,exit.w,exit.h,"#55d6a7");rect(exit.x+6,exit.y+7,24,28,"#18264b");rect(exit.x+23,exit.y+19,3,3,"#ffe66d");
+    ctx.fillStyle="#fff";ctx.font="bold 13px Courier New";ctx.fillText("EXIT",exit.x-3,exit.y-7);
+    fruits.forEach(f=>{if(!f.taken)drawFruit(f);});
+    enemies.forEach((e,i)=>{
+      rect(e.x+4,e.y+3,22,23,i===0?"#ed5b78":"#b36be8");
+      rect(e.x+3,e.y,7,7,"#ffb4c4");rect(e.x+20,e.y,7,7,"#ffb4c4");
+      rect(e.x+7,e.y+8,5,5,"#fff");rect(e.x+19,e.y+8,5,5,"#fff");
+      rect(e.x+10,e.y+10,3,3,"#29213b");rect(e.x+21,e.y+10,3,3,"#29213b");
+      rect(e.x+8,e.y+24,6,5,"#ffe66d");rect(e.x+19,e.y+24,6,5,"#ffe66d");
+    });
+    if(player && !(invincible>0 && Math.floor(anim*12)%2===0))drawRaccoon(player.x,player.y,player.face);
+    // status bar inside playfield
+    rect(0,0,W,31,"#0b1029");ctx.fillStyle="#ffe66d";ctx.font="bold 15px Courier New";
+    ctx.fillText("FRUITS "+fruits.filter(f=>f.taken).length+"/"+fruits.length,15,21);
+    ctx.fillStyle="#d7dcff";ctx.fillText("STAGE "+stage, W-115,21);
+    if(messageTimer>0){messageTimer-=1/60;ctx.fillStyle="#fff";ctx.font="bold 28px Courier New";ctx.textAlign="center";ctx.fillText("STAGE "+stage,W/2,65);ctx.textAlign="left";}
+  }
+  function loop(t) {
+    const dt=Math.min((t-lastTime)/1000||0,0.035);lastTime=t;
+    update(dt);draw();requestAnimationFrame(loop);
+  }
+  setupStage();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
